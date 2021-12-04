@@ -1,0 +1,18 @@
+<html>
+<head>
+	<title>Account storage app: {{.Title}}</title>
+</head>
+<body>
+<h1>History for account {{.Account.Id}}: {{.Account.Balance}}</h1>
+
+<table border=1>
+	<tr><th>ID</th><th>Time</th><th>Sender</th><th>Recipient</th><th>Block</th><th>Gas</th><th>Gas Price</th><th>Value</th></tr>
+	{{ range .Chunks}}
+	<tr><td>{{.TxHash}}</td><td>{{.Time}}</td><td>{{.Sender}}</td><td>{{.Recipient}}</td><td>{{.Block}}</td><td>{{.Gas}}</td><td>{{.GasPrice}}</td><td>{{.Value}}</td></tr>
+	{{ end }}
+
+</table>
+<p>[<a href="/logout">Logout</a>]</p>
+
+</body>
+</html>

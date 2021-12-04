@@ -1,0 +1,23 @@
+<html>
+<head>
+	<title>Account storage app: {{.Title}}</title>
+</head>
+<body>
+<h1>Transfer coins from account {{.Account.Id}}: {{.Account.Balance}}</h1>
+
+<form name="transfer" action="/transfer/{{.Account.Id}}" method="post">
+	recipient:
+	<select name="recipient">
+		{{ range .Chunks}}
+		<option value="{{.Id}}">{{.Id}} ({{.Email}})</option>
+		{{ end }}
+	</select>
+	amount: <input type="text" name="amount" required/>
+	account passphrase: <input type="password" name="password" required/>
+	<input type="submit"/>
+</form>
+
+<p>[<a href="/logout">Logout</a>]</p>
+
+</body>
+</html>

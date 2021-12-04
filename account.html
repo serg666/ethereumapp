@@ -1,0 +1,17 @@
+<html>
+<head>
+	<title>Account storage app: {{.Title}}</title>
+</head>
+<body>
+<h1>Add account</h1>
+<p>Warning! If you have lost your account password you will not be able to get access to your funds. Passphrase can not be recovered!</p>
+<form name="add" action="/account" method="post">
+	Passphrase for your account: <input type="password" name="passwd" required>
+	You can buy some coins: <input type="text" name="amount">
+ 	<input type="submit"/>
+</form>
+
+<p>[<a href="/logout">Logout</a>]</p>
+
+</body>
+</html>
