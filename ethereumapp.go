@@ -186,6 +186,7 @@ func main_page(w http.ResponseWriter, r *http.Request) {
 			p.Chunks = append(p.Chunks, acc)
 		}
 	}
+	session.Save(r, w)
 	renderTemplate(w, "main", p)
 }
 
@@ -203,9 +204,11 @@ func account_page(w http.ResponseWriter, r *http.Request) {
 		p := &Page{
 			Title: email,
 		}
+		session.Save(r, w)
 		renderTemplate(w, "account", p)
 	case "POST":
 		if err := r.ParseForm(); err != nil {
+			session.Save(r, w)
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
@@ -232,8 +235,10 @@ func account_page(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		session.Save(r, w)
 		http.Redirect(w, r, "/", http.StatusFound)
 	default:
+		session.Save(r, w)
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 
@@ -249,6 +254,7 @@ func historyHandler(w http.ResponseWriter, r *http.Request, account string) {
 	email, _ := session.Values["email"].(string)
 	acc, err := readAccount(account)
 	if err != nil {
+		session.Save(r, w)
 		http.NotFound(w, r)
 		return
 	}
@@ -260,6 +266,7 @@ func historyHandler(w http.ResponseWriter, r *http.Request, account string) {
 	if err != nil {
 		log.Printf("Error to get account history: %v", err)
 	}
+	session.Save(r, w)
 	renderTemplate(w, "history", p)
 }
 
@@ -273,6 +280,7 @@ func transferHandler(w http.ResponseWriter, r *http.Request, account string) {
 	email, _ := session.Values["email"].(string)
 	sender, err := readAccount(account)
 	if err != nil {
+		session.Save(r, w)
 		http.NotFound(w, r)
 		return
 	}
@@ -293,9 +301,11 @@ func transferHandler(w http.ResponseWriter, r *http.Request, account string) {
 		} else {
 			log.Printf("Can not get all accounts: %v", err)
 		}
+		session.Save(r, w)
 		renderTemplate(w, "transfer", p)
 	case "POST":
 		if err := r.ParseForm(); err != nil {
+			session.Save(r, w)
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
@@ -310,8 +320,10 @@ func transferHandler(w http.ResponseWriter, r *http.Request, account string) {
 			err = rpcClient.Call(&txHash, "personal_sendTransaction", tx, r.FormValue("password"))
 			log.Printf("Transfer coins from %s to %s: %v, %v", account, r.FormValue("recipient"), txHash, err)
 		}
+		session.Save(r, w)
 		http.Redirect(w, r, "/", http.StatusFound)
 	default:
+		session.Save(r, w)
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 }
