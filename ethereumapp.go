@@ -290,6 +290,8 @@ func transferHandler(w http.ResponseWriter, r *http.Request, account string) {
 					p.Chunks = append(p.Chunks, acc)
 				}
 			}
+		} else {
+			log.Printf("Can not get all accounts: %v", err)
 		}
 		renderTemplate(w, "transfer", p)
 	case "POST":
@@ -613,7 +615,7 @@ func main() {
 		isCreated = true
 	}
 
-	sqliteDatabase, err = sql.Open("sqlite3", "sqlite-database.db")
+	sqliteDatabase, err = sql.Open("sqlite3", "file:sqlite-database.db?_foreign_keys=on")
 	if err != nil {
 		log.Fatalf("Can not open sqlite3 database: %v", err)
 	}
