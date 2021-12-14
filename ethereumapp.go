@@ -566,23 +566,28 @@ func index_transactions() {
 				for _, transaction := range block.Transactions() {
 					message, err := transaction.AsMessage(types.LatestSignerForChainID(transaction.ChainId()), nil)
 					if err == nil {
-						insertSQL := `insert into ethtxs (time, sender, recipient, gas, gasprice, block, txhash, value) values (?, ?, ?, ?, ?, ?, ?, ?)`
-						insert, err := sqliteDatabase.Prepare(insertSQL)
-						defer insert.Close()
-						if err == nil {
-							val, _ := weiToEther(message.Value()).Float64()
-							_, err = insert.Exec(
-								block.Time(),
-								message.From().Hex(),
-								message.To().Hex(),
-								message.Gas(),
-								message.GasPrice().Uint64(),
-								block.NumberU64(),
-								transaction.Hash().Hex(),
-								val,
-							)
-							if err != nil {
-								log.Printf("Error insert record: %v", err)
+						log.Printf("mess val: %v, %T", message.Value(), message.Value())
+						log.Printf("mess is_fake: %v", message.IsFake())
+						log.Printf("mess data: %v", message.Data())
+						if !(message.Value().Cmp(big.NewInt(0)) == 0 && len(message.Data()) > 0) {
+							insertSQL := `insert into ethtxs (time, sender, recipient, gas, gasprice, block, txhash, value) values (?, ?, ?, ?, ?, ?, ?, ?)`
+							insert, err := sqliteDatabase.Prepare(insertSQL)
+							defer insert.Close()
+							if err == nil {
+								val, _ := weiToEther(message.Value()).Float64()
+								_, err = insert.Exec(
+									block.Time(),
+									message.From().Hex(),
+									message.To().Hex(),
+									message.Gas(),
+									message.GasPrice().Uint64(),
+									block.NumberU64(),
+									transaction.Hash().Hex(),
+									val,
+								)
+								if err != nil {
+									log.Printf("Error insert record: %v", err)
+								}
 							}
 						}
 					}
