@@ -601,7 +601,7 @@ func index_transactions() {
 func main() {
 	// @note: set auto logoff to 5 minutes of idle
 	store.MaxAge(300)
-	rpcServerUrl := flag.String("rpc-server-url", "http://127.0.0.1:8545", "HTTP-RPC server URL")
+	dataDir := flag.String("data-dir", "~datadir", "Data dir")
 	baseAccount = flag.String("base-account", "0x5883b8991821d1d80f9b64d44d2fc75cb8e2c16a", "Network base account")
 	httpHost := flag.String("http-host", "127.0.0.1", "Run http server on given host")
 	httpPort := flag.Int("http-port", 6776, "Run http server on given port")
@@ -611,13 +611,14 @@ func main() {
 	log.SetPrefix("ethereumapp: ")
 	log.Println("=========== application starts ==========")
 
-	ethClient, err = ethclient.Dial(*rpcServerUrl)
+	ipc := fmt.Sprintf("%s/geth.ipc", *dataDir)
+	ethClient, err = ethclient.Dial(ipc)
 	if err != nil {
 		log.Fatalf("Can not connect to ethereum network: %v", err)
 	}
 	defer ethClient.Close()
 
-	rpcClient, err = rpc.Dial(*rpcServerUrl)
+	rpcClient, err = rpc.Dial(ipc)
 	if err != nil {
 		log.Fatalf("Can not get RPC client: %v", err)
 	}
