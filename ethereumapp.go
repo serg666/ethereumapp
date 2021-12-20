@@ -1,3 +1,5 @@
+//go:generate abigen --sol nft.sol --pkg main --out nft.go
+
 package main
 
 import (
@@ -569,25 +571,30 @@ func index_transactions() {
 						log.Printf("mess val: %v, %T", message.Value(), message.Value())
 						log.Printf("mess is_fake: %v", message.IsFake())
 						log.Printf("mess data: %v", message.Data())
-						if !(message.Value().Cmp(big.NewInt(0)) == 0 && len(message.Data()) > 0) {
-							insertSQL := `insert into ethtxs (time, sender, recipient, gas, gasprice, block, txhash, value) values (?, ?, ?, ?, ?, ?, ?, ?)`
-							insert, err := sqliteDatabase.Prepare(insertSQL)
-							defer insert.Close()
-							if err == nil {
-								val, _ := weiToEther(message.Value()).Float64()
-								_, err = insert.Exec(
-									block.Time(),
-									message.From().Hex(),
-									message.To().Hex(),
-									message.Gas(),
-									message.GasPrice().Uint64(),
-									block.NumberU64(),
-									transaction.Hash().Hex(),
-									val,
-								)
-								if err != nil {
-									log.Printf("Error insert record: %v", err)
-								}
+						log.Printf("From: %v", message.From().Hex())
+						log.Printf("To: %v", message.To())
+						to := message.To()
+						var toHex string = ""
+						if to != nil {
+							toHex = to.Hex()
+						}
+						insertSQL := `insert into ethtxs (time, sender, recipient, gas, gasprice, block, txhash, value) values (?, ?, ?, ?, ?, ?, ?, ?)`
+						insert, err := sqliteDatabase.Prepare(insertSQL)
+						defer insert.Close()
+						if err == nil {
+							val, _ := weiToEther(message.Value()).Float64()
+							_, err = insert.Exec(
+								block.Time(),
+								message.From().Hex(),
+								toHex,
+								message.Gas(),
+								message.GasPrice().Uint64(),
+								block.NumberU64(),
+								transaction.Hash().Hex(),
+								val,
+							)
+							if err != nil {
+								log.Printf("Error insert record: %v", err)
 							}
 						}
 					}
