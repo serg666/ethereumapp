@@ -1,0 +1,25 @@
+<html>
+<head>
+	<title>Account storage app: {{.Title}}</title>
+</head>
+<body>
+<h1>Non-fungible tokens for account {{.Account.Id}}</h1>
+
+<form name="nft" action="/nft/{{.Account.Id}}" method="post">
+<table border=0>
+<tr>
+<td>Token name:</td>
+<td><input type="text" name="name" required/></td>
+</tr>
+<tr>
+<td>Token symbol:</td>
+<td><input type="text" name="symbol" required/></td>
+</tr>
+</table>
+<input type="submit" value="Create NFT"/>
+</form>
+
+{{ template "footer.html" . }}
+
+</body>
+</html>

@@ -1,4 +1,4 @@
-//go:generate abigen --sol nft.sol --pkg main --out nft.go
+//go:generate abigen --sol nft/nft.sol --pkg nft --out nft/nft.go
 
 package main
 
@@ -67,9 +67,9 @@ var (
 	rpcClient *rpc.Client
 	ethClient *ethclient.Client
 	key = []byte("super-secret-key")
-	templates = template.Must(template.ParseFiles("main.html", "login.html", "account.html", "history.html", "transfer.html"))
+	templates = template.Must(template.ParseFiles("main.html", "login.html", "account.html", "history.html", "transfer.html", "nft.html", "footer.html"))
 	store = sessions.NewCookieStore(key)
-	validPath = regexp.MustCompile("^/(history|transfer)/([a-z0-9]+)$")
+	validPath = regexp.MustCompile("^/(history|transfer|nft)/([a-z0-9]+)$")
 )
 
 func weiToEther(wei *big.Int) *big.Float {
@@ -244,6 +244,38 @@ func account_page(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 
+}
+
+func nftHandler(w http.ResponseWriter, r *http.Request, account string) {
+	session, _ := store.Get(r, "cookie-name")
+	if auth, ok := session.Values["authenticated"].(bool); !ok || !auth {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	email, _ := session.Values["email"].(string)
+	acc, err := readAccount(account)
+	if err != nil {
+		session.Save(r, w)
+		http.NotFound(w, r)
+		return
+	}
+	session.Save(r, w)
+	switch r.Method {
+	case "GET":
+		p := &Page{
+			Title: email,
+			Account: acc,
+		}
+		renderTemplate(w, "nft", p)
+	case "POST":
+		if err := r.ParseForm(); err != nil {
+			http.Redirect(w, r, fmt.Sprintf("/nft/%s", account), http.StatusFound)
+			return
+		}
+	default:
+		http.Redirect(w, r, fmt.Sprintf("/nft/%s", account), http.StatusFound)
+	}
 }
 
 func historyHandler(w http.ResponseWriter, r *http.Request, account string) {
@@ -537,6 +569,10 @@ func initDB() {
 		block integer,
 		txhash text,
 		value numeric
+	);create table contracts (
+		id varchar(255) not null primary key,
+		account_id varchar(255) not null,
+		foreign key(account_id) references accounts(id)
 	);`
 
 	_, err := sqliteDatabase.Exec(initSQL)
@@ -661,5 +697,6 @@ func main() {
 	http.HandleFunc("/auth", auth_page)
 	http.HandleFunc("/history/", makeHandler(historyHandler))
 	http.HandleFunc("/transfer/", makeHandler(transferHandler))
+	http.HandleFunc("/nft/", makeHandler(nftHandler))
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", *httpHost, *httpPort), nil))
 }

@@ -6,7 +6,7 @@
 <h1>Accounts</h1>
 <ul>
 	{{ range .Chunks}}
-	<li><a href="/history/{{.Id}}" title="Account history">{{.Id}}</a>: <a href="/transfer/{{.Id}}" title="Make payment from account">{{.Balance}}</a></li>
+	<li><a href="/history/{{.Id}}" title="Account history">{{.Id}}</a>: <a href="/transfer/{{.Id}}" title="Make payment from account">{{.Balance}}</a> (<a href="nft/{{.Id}}" title="Create NFT for account">NFT</a>)</li>
 	{{ end }}
 </ul>
 
