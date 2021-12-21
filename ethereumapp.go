@@ -67,7 +67,15 @@ var (
 	rpcClient *rpc.Client
 	ethClient *ethclient.Client
 	key = []byte("super-secret-key")
-	templates = template.Must(template.ParseFiles("main.html", "login.html", "account.html", "history.html", "transfer.html", "nft.html", "footer.html"))
+	templates = template.Must(template.ParseFiles(
+		"templates/main.html",
+		"templates/login.html",
+		"templates/account.html",
+		"templates/history.html",
+		"templates/transfer.html",
+		"templates/nft.html",
+		"templates/footer.html",
+	))
 	store = sessions.NewCookieStore(key)
 	validPath = regexp.MustCompile("^/(history|transfer|nft)/([a-z0-9]+)$")
 )
