@@ -47,8 +47,10 @@ type Asset struct {
 	Description string
 	Content     []byte
 	ContentType string
-	TxHash      string
-	TokenId     int64
+}
+
+type Token struct {
+	Id int64
 }
 
 type Account struct {
@@ -98,7 +100,7 @@ var (
 		"templates/transfer.html",
 		"templates/nft.html",
 		"templates/asset.html",
-		"templates/assets.html",
+		"templates/tokens.html",
 		"templates/footer.html",
 	))
 	store = sessions.NewCookieStore(key)
@@ -129,8 +131,8 @@ func ParseBigFloat(value string) (*big.Float, error) {
 	return f, err
 }
 
-func (asset *Asset) Owner() string {
-	if owner, err := token.OwnerOf(&bind.CallOpts{}, big.NewInt(asset.TokenId)); err == nil {
+func (t *Token) Owner() string {
+	if owner, err := token.OwnerOf(&bind.CallOpts{}, big.NewInt(t.Id)); err == nil {
 		if acc, err := readAccount(owner.Hex()); err == nil {
 			return fmt.Sprintf("%s (%s)", acc.Id, acc.Email)
 		}
@@ -138,7 +140,16 @@ func (asset *Asset) Owner() string {
 	}
 	log.Printf("ownerof err: %v", err)
 
-	return "Not awailable yet"
+	return "Not available now"
+}
+
+func (t *Token) URI() string {
+	if uri, err := token.TokenURI(&bind.CallOpts{}, big.NewInt(t.Id)); err == nil {
+		return uri
+	}
+	log.Printf("token uri err: %v", err)
+
+	return "Not available now"
 }
 
 func (a *Account) Balance() *big.Float {
@@ -328,7 +339,7 @@ func imgHandler(w http.ResponseWriter, r *http.Request, id string) {
 	log.Printf("img err: %v", err)
 }
 
-func assets_page(w http.ResponseWriter, r *http.Request) {
+func tokens_page(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "cookie-name")
 	if auth, ok := session.Values["authenticated"].(bool); !ok || !auth {
 		http.Redirect(w, r, "/login", http.StatusFound)
@@ -339,10 +350,10 @@ func assets_page(w http.ResponseWriter, r *http.Request) {
 	p := &Page{
 		Title: email,
 	}
-	err := getAllAssets(&p.Chunks)
-	log.Printf("getAllAssets err: %v", err)
+	err := getAllTokens(&p.Chunks)
+	log.Printf("getAllTokens err: %v", err)
 	session.Save(r, w)
-	renderTemplate(w, "assets", p)
+	renderTemplate(w, "tokens", p)
 }
 
 func nft_page(w http.ResponseWriter, r *http.Request) {
@@ -382,7 +393,7 @@ func nft_page(w http.ResponseWriter, r *http.Request) {
 							xhashes.MD5(string(fileBytes)),
 						)); err == nil {
 							log.Printf("Mint tx: %v", ntx.Hash())
-							insertSQL := `insert into assets (id, name, description, content, content_type, tx_hash) values (?, ?, ?, ?, ?, ?)`
+							insertSQL := `insert into assets (id, name, description, content, content_type) values (?, ?, ?, ?, ?)`
 							if stmt, err := sqliteDatabase.Prepare(insertSQL); err == nil {
 								defer stmt.Close()
 								result, err := stmt.Exec(
@@ -391,7 +402,6 @@ func nft_page(w http.ResponseWriter, r *http.Request) {
 									r.FormValue("description"),
 									fileBytes,
 									handler.Header["Content-Type"][0],
-									ntx.Hash().Hex(),
 								)
 								log.Printf("Insert result: %v", result)
 								log.Printf("Insert err: %v", err)
@@ -407,7 +417,7 @@ func nft_page(w http.ResponseWriter, r *http.Request) {
 			log.Printf("File err: %v", err)
 		}
 		log.Printf("Parse err: %v", err)
-		http.Redirect(w, r, "/assets", http.StatusFound)
+		http.Redirect(w, r, "/tokens", http.StatusFound)
 	default:
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
@@ -528,27 +538,27 @@ func getAccountHistory(acc *Account, result *[]interface{}) error {
 	return nil
 }
 
-func getAllAssets(assets *[]interface {}) error {
-	stmt, err := sqliteDatabase.Prepare("select * from assets")
+func getAllTokens(tokens *[]interface {}) error {
+	stmt, err := sqliteDatabase.Prepare("select * from tokens")
 	if err != nil {
-		return fmt.Errorf("Failed to get assets: %v", err)
+		return fmt.Errorf("Failed to get tokens: %v", err)
 	}
 	defer stmt.Close()
 
 	rows, err := stmt.Query()
 	if err != nil {
-		return fmt.Errorf("Failed to get assets: %v", err)
+		return fmt.Errorf("Failed to get tokens: %v", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var asset Asset
-		if err := rows.Scan(&asset.Id, &asset.Name, &asset.Description, &asset.Content, &asset.ContentType, &asset.TxHash, &asset.TokenId); err == nil {
-			*assets = append(*assets, &asset)
+		var t Token
+		if err := rows.Scan(&t.Id); err == nil {
+			*tokens = append(*tokens, &t)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("Failed to iterating over rows of assets: %v", err)
+		return fmt.Errorf("Failed to iterating over rows of tokens: %v", err)
 	}
 
 	return nil
@@ -680,7 +690,7 @@ func readAsset(id string) (*Asset, error) {
 	defer stmt.Close()
 
 	var asset Asset
-	err = stmt.QueryRow(id).Scan(&asset.Id, &asset.Name, &asset.Description, &asset.Content, &asset.ContentType, &asset.TxHash, &asset.TokenId)
+	err = stmt.QueryRow(id).Scan(&asset.Id, &asset.Name, &asset.Description, &asset.Content, &asset.ContentType)
 
 	switch {
 	case err == sql.ErrNoRows:
@@ -751,13 +761,13 @@ func initDB() {
 		txhash text,
 		value numeric
 	);create table assets (
-		id varchar(32) not null primary key,
+		id varchar(32) not null unique,
 		name varchar(255) not null,
 		description varchar(255) not null,
 		content blob not null,
-		content_type varchar(255) not null,
-		tx_hash varchar(255) not null unique,
-		token_id integer
+		content_type varchar(255) not null
+	);create table tokens (
+		id integer not null unique
 	);`
 
 	_, err := sqliteDatabase.Exec(initSQL)
@@ -793,14 +803,14 @@ func get_events() {
 				log.Printf("To: %s", common.HexToAddress(vLog.Topics[2].Hex()))
 				log.Printf("Token: %s", vLog.Topics[3].Big().String())
 				log.Printf("Tx Hash: %s", vLog.TxHash.Hex())
-				updateSQL := `update assets set token_id = ? where tx_hash = ?`
-				if stmt, err := sqliteDatabase.Prepare(updateSQL); err == nil {
+				insertSQL := `insert into tokens (id) values (?)`
+				if stmt, err := sqliteDatabase.Prepare(insertSQL); err == nil {
 					defer stmt.Close()
-					result, err := stmt.Exec(vLog.Topics[3].Big().Int64(), vLog.TxHash.Hex())
-					log.Printf("Update result: %v", result)
-					log.Printf("Update err: %v", err)
+					result, err := stmt.Exec(vLog.Topics[3].Big().Int64())
+					log.Printf("Insert result: %v", result)
+					log.Printf("Insert err: %v", err)
 				}
-				log.Printf("Prepare update err: %v", err)
+				log.Printf("Prepare insert err: %v", err)
 			default:
 				log.Println(vLog)
 			}
@@ -945,7 +955,7 @@ func main() {
 	http.HandleFunc("/logout", logout_page)
 	http.HandleFunc("/account", account_page)
 	http.HandleFunc("/nft", nft_page)
-	http.HandleFunc("/assets", assets_page)
+	http.HandleFunc("/tokens", tokens_page)
 	http.HandleFunc("/auth", auth_page)
 	http.HandleFunc("/history/", makeHandler(historyHandler))
 	http.HandleFunc("/transfer/", makeHandler(transferHandler))

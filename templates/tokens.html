@@ -3,10 +3,10 @@
 	<title>Account storage app: {{.Title}}</title>
 </head>
 <body>
-<h1>Assets</h1>
+<h1>Tokens</h1>
 <ul>
 	{{ range .Chunks}}
-	<li><a href="/asset/{{.Id}}" title="{{.Description}}">{{.Name}}</a>: [{{.Owner}}]</li>
+	<li><a href="{{.URI}}" title="View asset page">{{.Id}}</a>: [{{.Owner}}]</li>
 	{{ end }}
 </ul>
 
