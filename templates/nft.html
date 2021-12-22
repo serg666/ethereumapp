@@ -3,20 +3,34 @@
 	<title>Account storage app: {{.Title}}</title>
 </head>
 <body>
-<h1>Non-fungible tokens for account {{.Account.Id}}</h1>
+<h1>Mint Non-fungible token</h1>
 
-<form name="nft" action="/nft/{{.Account.Id}}" method="post">
+<form name="nft" action="/nft" method="post" enctype="multipart/form-data">
 <table border=0>
 <tr>
-<td>Token name:</td>
+<td>Asset owner:</td>
+<td>
+        <select name="owner">
+                {{ range .Chunks}}
+                <option value="{{.Id}}">{{.Id}} ({{.Email}})</option>
+                {{ end }}
+        </select>
+</td>
+</tr>
+<tr>
+<td>Asset name:</td>
 <td><input type="text" name="name" required/></td>
 </tr>
 <tr>
-<td>Token symbol:</td>
-<td><input type="text" name="symbol" required/></td>
+<td>Asset description:</td>
+<td><input type="text" name="description" required/></td>
+</tr>
+<tr>
+<td>Asset image:</td>
+<td><input type="file" name="image" accept="image/*" required/></td>
 </tr>
 </table>
-<input type="submit" value="Create NFT"/>
+<input type="submit" value="Mint NFT"/>
 </form>
 
 {{ template "footer.html" . }}

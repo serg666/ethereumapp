@@ -15,21 +15,40 @@ import (
 	"html/template"
 	"database/sql"
 	"math/big"
+	"io/ioutil"
+	"strconv"
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/keystore"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gorilla/sessions"
 	"github.com/shomali11/util/xhashes"
+	"github.com/serg666/ethereumapp/nft"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type Page struct {
 	Title   string
 	Account *Account
+	Asset   *Asset
 	Chunks  []interface{}
+}
+
+type Asset struct {
+	Id          string
+	Name        string
+	Description string
+	Content     []byte
+	ContentType string
+	TxHash      string
+	TokenId     int64
 }
 
 type Account struct {
@@ -62,10 +81,14 @@ type Participant struct {
 
 var (
 	err error
+	dataDir *string
 	baseAccount *string
+	contractAddress *string
 	sqliteDatabase *sql.DB
 	rpcClient *rpc.Client
 	ethClient *ethclient.Client
+	token *nft.SampleNFT
+	transactor *bind.TransactOpts
 	key = []byte("super-secret-key")
 	templates = template.Must(template.ParseFiles(
 		"templates/main.html",
@@ -74,10 +97,12 @@ var (
 		"templates/history.html",
 		"templates/transfer.html",
 		"templates/nft.html",
+		"templates/asset.html",
+		"templates/assets.html",
 		"templates/footer.html",
 	))
 	store = sessions.NewCookieStore(key)
-	validPath = regexp.MustCompile("^/(history|transfer|nft)/([a-z0-9]+)$")
+	validPath = regexp.MustCompile("^/(history|transfer|img|asset)/([a-z0-9]+)$")
 )
 
 func weiToEther(wei *big.Int) *big.Float {
@@ -102,6 +127,18 @@ func ParseBigFloat(value string) (*big.Float, error) {
 	_, err := fmt.Sscan(value, f)
 
 	return f, err
+}
+
+func (asset *Asset) Owner() string {
+	if owner, err := token.OwnerOf(&bind.CallOpts{}, big.NewInt(asset.TokenId)); err == nil {
+		if acc, err := readAccount(owner.Hex()); err == nil {
+			return fmt.Sprintf("%s (%s)", acc.Id, acc.Email)
+		}
+		log.Printf("read acc err: %v", err)
+	}
+	log.Printf("ownerof err: %v", err)
+
+	return "Not awailable yet"
 }
 
 func (a *Account) Balance() *big.Float {
@@ -254,7 +291,7 @@ func account_page(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func nftHandler(w http.ResponseWriter, r *http.Request, account string) {
+func assetHandler(w http.ResponseWriter, r *http.Request, id string) {
 	session, _ := store.Get(r, "cookie-name")
 	if auth, ok := session.Values["authenticated"].(bool); !ok || !auth {
 		http.Redirect(w, r, "/login", http.StatusFound)
@@ -262,27 +299,117 @@ func nftHandler(w http.ResponseWriter, r *http.Request, account string) {
 	}
 
 	email, _ := session.Values["email"].(string)
-	acc, err := readAccount(account)
+
+	asset, err := readAsset(id)
 	if err != nil {
-		session.Save(r, w)
 		http.NotFound(w, r)
 		return
 	}
+
+	p := &Page{
+		Title: email,
+		Asset: asset,
+	}
 	session.Save(r, w)
+	renderTemplate(w, "asset", p)
+}
+
+func imgHandler(w http.ResponseWriter, r *http.Request, id string) {
+	asset, err := readAsset(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", asset.ContentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(asset.Content)))
+	imgLen, err := w.Write(asset.Content)
+	log.Printf("img len: %v", imgLen)
+	log.Printf("img err: %v", err)
+}
+
+func assets_page(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "cookie-name")
+	if auth, ok := session.Values["authenticated"].(bool); !ok || !auth {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	email, _ := session.Values["email"].(string)
+	p := &Page{
+		Title: email,
+	}
+	err := getAllAssets(&p.Chunks)
+	log.Printf("getAllAssets err: %v", err)
+	session.Save(r, w)
+	renderTemplate(w, "assets", p)
+}
+
+func nft_page(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "cookie-name")
+	if auth, ok := session.Values["authenticated"].(bool); !ok || !auth {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	email, _ := session.Values["email"].(string)
+	session.Save(r, w)
+
 	switch r.Method {
 	case "GET":
 		p := &Page{
 			Title: email,
-			Account: acc,
+		}
+		if accounts, err := getAllAccounts(); err == nil {
+			for _, acc := range accounts {
+				p.Chunks = append(p.Chunks, acc)
+			}
 		}
 		renderTemplate(w, "nft", p)
 	case "POST":
-		if err := r.ParseForm(); err != nil {
-			http.Redirect(w, r, fmt.Sprintf("/nft/%s", account), http.StatusFound)
-			return
+		if err := r.ParseMultipartForm(10 << 20); err == nil {
+			if file, handler, err := r.FormFile("image"); err == nil {
+				defer file.Close()
+				log.Printf("Uploaded File: %v", handler.Filename)
+				log.Printf("File Size: %v", handler.Size)
+				log.Printf("MIME Header: %v", handler.Header)
+
+				if strings.HasPrefix(handler.Header["Content-Type"][0], "image") {
+					if fileBytes, err := ioutil.ReadAll(file); err == nil {
+						log.Printf("MD5: %s", xhashes.MD5(string(fileBytes)))
+						if ntx, err := token.MintNFT(transactor, common.HexToAddress(r.FormValue("owner")), fmt.Sprintf(
+							"/asset/%s",
+							xhashes.MD5(string(fileBytes)),
+						)); err == nil {
+							log.Printf("Mint tx: %v", ntx.Hash())
+							insertSQL := `insert into assets (id, name, description, content, content_type, tx_hash) values (?, ?, ?, ?, ?, ?)`
+							if stmt, err := sqliteDatabase.Prepare(insertSQL); err == nil {
+								defer stmt.Close()
+								result, err := stmt.Exec(
+									xhashes.MD5(string(fileBytes)),
+									r.FormValue("name"),
+									r.FormValue("description"),
+									fileBytes,
+									handler.Header["Content-Type"][0],
+									ntx.Hash().Hex(),
+								)
+								log.Printf("Insert result: %v", result)
+								log.Printf("Insert err: %v", err)
+								// @note: now we will be waiting for transaction mined and emit Transfer event with new token_id
+							}
+							log.Printf("Prepare err: %v", err)
+						}
+						log.Printf("Mint err: %v", err)
+					}
+					log.Printf("Read file err: %v", err)
+				}
+			}
+			log.Printf("File err: %v", err)
 		}
+		log.Printf("Parse err: %v", err)
+		http.Redirect(w, r, "/assets", http.StatusFound)
 	default:
-		http.Redirect(w, r, fmt.Sprintf("/nft/%s", account), http.StatusFound)
+		http.Redirect(w, r, "/", http.StatusFound)
 	}
 }
 
@@ -396,6 +523,32 @@ func getAccountHistory(acc *Account, result *[]interface{}) error {
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("failed to iteration ober rows of %v account: %v", acc.Id, err)
+	}
+
+	return nil
+}
+
+func getAllAssets(assets *[]interface {}) error {
+	stmt, err := sqliteDatabase.Prepare("select * from assets")
+	if err != nil {
+		return fmt.Errorf("Failed to get assets: %v", err)
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		return fmt.Errorf("Failed to get assets: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var asset Asset
+		if err := rows.Scan(&asset.Id, &asset.Name, &asset.Description, &asset.Content, &asset.ContentType, &asset.TxHash, &asset.TokenId); err == nil {
+			*assets = append(*assets, &asset)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("Failed to iterating over rows of assets: %v", err)
 	}
 
 	return nil
@@ -519,8 +672,28 @@ func createParticipant(email, passwd string) (*Participant, error) {
 	return &participant, nil
 }
 
+func readAsset(id string) (*Asset, error) {
+	stmt, err := sqliteDatabase.Prepare("select * from assets where id = ?")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get asset %s: %v", id, err)
+	}
+	defer stmt.Close()
+
+	var asset Asset
+	err = stmt.QueryRow(id).Scan(&asset.Id, &asset.Name, &asset.Description, &asset.Content, &asset.ContentType, &asset.TxHash, &asset.TokenId)
+
+	switch {
+	case err == sql.ErrNoRows:
+		return nil, fmt.Errorf("asset %s does not exists", id)
+	case err != nil:
+		return nil, fmt.Errorf("failed to get asset %s: %v", id, err)
+	default:
+		return &asset, nil
+	}
+}
+
 func readAccount(id string) (*Account, error) {
-	stmt, err := sqliteDatabase.Prepare("select t1.id, t2.email from accounts as t1 left join participants as t2 on t2.id=t1.participant_id where t1.id = ?")
+	stmt, err := sqliteDatabase.Prepare("select t1.id, t2.email from accounts as t1 left join participants as t2 on t2.id=t1.participant_id where lower(t1.id) = lower(?)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get account %s: %v", id, err)
 	}
@@ -577,15 +750,61 @@ func initDB() {
 		block integer,
 		txhash text,
 		value numeric
-	);create table contracts (
-		id varchar(255) not null primary key,
-		account_id varchar(255) not null,
-		foreign key(account_id) references accounts(id)
+	);create table assets (
+		id varchar(32) not null primary key,
+		name varchar(255) not null,
+		description varchar(255) not null,
+		content blob not null,
+		content_type varchar(255) not null,
+		tx_hash varchar(255) not null unique,
+		token_id integer
 	);`
 
 	_, err := sqliteDatabase.Exec(initSQL)
 	if err != nil {
 		log.Fatalf("Can not init database: %v", err)
+	}
+}
+
+func get_events() {
+	contract := common.HexToAddress(*contractAddress)
+	query := ethereum.FilterQuery{
+		Addresses: []common.Address{contract},
+	}
+
+	logs := make(chan types.Log)
+	sub, err := ethClient.SubscribeFilterLogs(context.Background(), query, logs)
+	if err != nil {
+		log.Fatalf("Can not get subscriber: %v", err)
+	}
+
+	logTransferSig := []byte("Transfer(address,address,uint256)")
+	logTransferSigHash := crypto.Keccak256Hash(logTransferSig)
+
+	for {
+		select {
+		case err := <-sub.Err():
+			log.Println(err)
+		case vLog := <-logs:
+			switch vLog.Topics[0].Hex() {
+			case logTransferSigHash.Hex():
+				log.Println("Log Name: Transfer")
+				log.Printf("From: %s", common.HexToAddress(vLog.Topics[1].Hex()))
+				log.Printf("To: %s", common.HexToAddress(vLog.Topics[2].Hex()))
+				log.Printf("Token: %s", vLog.Topics[3].Big().String())
+				log.Printf("Tx Hash: %s", vLog.TxHash.Hex())
+				updateSQL := `update assets set token_id = ? where tx_hash = ?`
+				if stmt, err := sqliteDatabase.Prepare(updateSQL); err == nil {
+					defer stmt.Close()
+					result, err := stmt.Exec(vLog.Topics[3].Big().Int64(), vLog.TxHash.Hex())
+					log.Printf("Update result: %v", result)
+					log.Printf("Update err: %v", err)
+				}
+				log.Printf("Prepare update err: %v", err)
+			default:
+				log.Println(vLog)
+			}
+		}
 	}
 }
 
@@ -652,8 +871,9 @@ func index_transactions() {
 func main() {
 	// @note: set auto logoff to 5 minutes of idle
 	store.MaxAge(300)
-	dataDir := flag.String("data-dir", "~datadir", "Data dir")
+	dataDir = flag.String("data-dir", "~datadir", "Data dir")
 	baseAccount = flag.String("base-account", "0x5883b8991821d1d80f9b64d44d2fc75cb8e2c16a", "Network base account")
+	contractAddress = flag.String("contract-address", "0xeF17a56684F69d4d7Cea92852bDEd504EEd59463", "NFT contract address")
 	httpHost := flag.String("http-host", "127.0.0.1", "Run http server on given host")
 	httpPort := flag.Int("http-port", 6776, "Run http server on given port")
 
@@ -668,6 +888,27 @@ func main() {
 		log.Fatalf("Can not connect to ethereum network: %v", err)
 	}
 	defer ethClient.Close()
+
+	chainID, err := ethClient.ChainID(context.Background())
+	if err != nil {
+		log.Fatalf("Can not get chain id: %v", err)
+	}
+
+	baseAcc := accounts.Account{
+		Address: common.HexToAddress(*baseAccount),
+	}
+	ks := keystore.NewKeyStore(fmt.Sprintf("%s/keystore", *dataDir), keystore.StandardScryptN, keystore.StandardScryptP)
+	ks.Unlock(baseAcc, os.Getenv("BASE_ACC_PASSWD"))
+
+	transactor, err = bind.NewKeyStoreTransactorWithChainID(ks, baseAcc, chainID)
+	if err != nil {
+		log.Fatalf("Can not get transactor: %v", err)
+	}
+
+	token, err = nft.NewSampleNFT(common.HexToAddress(*contractAddress), ethClient)
+	if err != nil {
+		log.Fatalf("Can not get token: %v", err)
+	}
 
 	rpcClient, err = rpc.Dial(ipc)
 	if err != nil {
@@ -697,14 +938,18 @@ func main() {
 	}
 
 	go index_transactions()
+	go get_events()
 
 	http.HandleFunc("/", main_page)
 	http.HandleFunc("/login", login_page)
 	http.HandleFunc("/logout", logout_page)
 	http.HandleFunc("/account", account_page)
+	http.HandleFunc("/nft", nft_page)
+	http.HandleFunc("/assets", assets_page)
 	http.HandleFunc("/auth", auth_page)
 	http.HandleFunc("/history/", makeHandler(historyHandler))
 	http.HandleFunc("/transfer/", makeHandler(transferHandler))
-	http.HandleFunc("/nft/", makeHandler(nftHandler))
+	http.HandleFunc("/img/", makeHandler(imgHandler))
+	http.HandleFunc("/asset/", makeHandler(assetHandler))
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", *httpHost, *httpPort), nil))
 }
