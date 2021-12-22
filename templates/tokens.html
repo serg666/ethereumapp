@@ -6,7 +6,7 @@
 <h1>Tokens</h1>
 <ul>
 	{{ range .Chunks}}
-	<li><a href="{{.URI}}" title="View asset page">{{.Id}}</a>: [{{.Owner}}]</li>
+	<li><a href="{{.URI}}" title="View asset page">{{.Id}}</a>: [<a href="/token/{{.Id}}" title="Transfer token to new owner">{{.Owner}}</a>]</li>
 	{{ end }}
 </ul>
 

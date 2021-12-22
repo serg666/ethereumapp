@@ -38,6 +38,7 @@ type Page struct {
 	Title   string
 	Account *Account
 	Asset   *Asset
+	Token   *Token
 	Chunks  []interface{}
 }
 
@@ -90,6 +91,8 @@ var (
 	rpcClient *rpc.Client
 	ethClient *ethclient.Client
 	token *nft.SampleNFT
+	chainID *big.Int
+	ks *keystore.KeyStore
 	transactor *bind.TransactOpts
 	key = []byte("super-secret-key")
 	templates = template.Must(template.ParseFiles(
@@ -101,10 +104,11 @@ var (
 		"templates/nft.html",
 		"templates/asset.html",
 		"templates/tokens.html",
+		"templates/token.html",
 		"templates/footer.html",
 	))
 	store = sessions.NewCookieStore(key)
-	validPath = regexp.MustCompile("^/(history|transfer|img|asset)/([a-z0-9]+)$")
+	validPath = regexp.MustCompile("^/(history|transfer|img|asset|token)/([a-z0-9]+)$")
 )
 
 func weiToEther(wei *big.Int) *big.Float {
@@ -131,14 +135,40 @@ func ParseBigFloat(value string) (*big.Float, error) {
 	return f, err
 }
 
-func (t *Token) Owner() string {
+func (t *Token) Symbol() string {
+	if symbol, err := token.Symbol(&bind.CallOpts{}); err == nil {
+		return symbol
+	}
+	log.Printf("token symbol err: %v", err)
+
+	return "Not available now"
+}
+
+func (t *Token) Name() string {
+	if name, err := token.Name(&bind.CallOpts{}); err == nil {
+		return name
+	}
+	log.Printf("token name err: %v", err)
+
+	return "Not available now"
+}
+
+func (t *Token) Account() *Account {
 	if owner, err := token.OwnerOf(&bind.CallOpts{}, big.NewInt(t.Id)); err == nil {
 		if acc, err := readAccount(owner.Hex()); err == nil {
-			return fmt.Sprintf("%s (%s)", acc.Id, acc.Email)
+			return acc
 		}
 		log.Printf("read acc err: %v", err)
 	}
 	log.Printf("ownerof err: %v", err)
+
+	return nil
+}
+
+func (t *Token) Owner() string {
+	if acc := t.Account(); acc != nil {
+		return fmt.Sprintf("%s (%s)", acc.Id, acc.Email)
+	}
 
 	return "Not available now"
 }
@@ -265,7 +295,7 @@ func account_page(w http.ResponseWriter, r *http.Request) {
 		session.Save(r, w)
 		renderTemplate(w, "account", p)
 	case "POST":
-		if err := r.ParseForm(); err != nil {
+		if err = r.ParseForm(); err != nil {
 			session.Save(r, w)
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
@@ -300,6 +330,66 @@ func account_page(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 
+}
+
+func tokenHandler(w http.ResponseWriter, r *http.Request, id string) {
+	session, _ := store.Get(r, "cookie-name")
+	if auth, ok := session.Values["authenticated"].(bool); !ok || !auth {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	email, _ := session.Values["email"].(string)
+	session.Save(r, w)
+
+	t, err := readToken(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		p := &Page{
+			Title: email,
+			Token: t,
+		}
+		if accounts, err := getAllAccounts(); err == nil {
+			for _, acc := range accounts {
+				if acc.Id != t.Account().Id {
+					p.Chunks = append(p.Chunks, acc)
+				}
+			}
+		}
+		renderTemplate(w, "token", p)
+	case "POST":
+		if err = r.ParseForm(); err == nil {
+			ownerAcc := accounts.Account{
+				Address: common.HexToAddress(t.Account().Id),
+			}
+			if err = ks.Unlock(ownerAcc, r.FormValue("password")); err == nil {
+				if transferTransactor, err := bind.NewKeyStoreTransactorWithChainID(ks, ownerAcc, chainID); err == nil {
+					if ttx, err := token.TransferFrom(
+						transferTransactor,
+						common.HexToAddress(t.Account().Id),
+						common.HexToAddress(r.FormValue("new_owner")),
+						big.NewInt(t.Id),
+					); err == nil {
+						log.Printf("transfer token tx hash: %v", ttx.Hash())
+					}
+					log.Printf("transfer token err: %v", err)
+				}
+				log.Printf("transfer transactor err: %v", err)
+				err = ks.Lock(common.HexToAddress(t.Account().Id))
+				log.Printf("Lock owner acc err: %v", err)
+			}
+			log.Printf("Transfer unlock err: %v", err)
+		}
+		log.Printf("Parse err: %v", err)
+		http.Redirect(w, r, "/tokens", http.StatusFound)
+	default:
+		http.Redirect(w, r, "/", http.StatusFound)
+	}
 }
 
 func assetHandler(w http.ResponseWriter, r *http.Request, id string) {
@@ -483,7 +573,7 @@ func transferHandler(w http.ResponseWriter, r *http.Request, account string) {
 		session.Save(r, w)
 		renderTemplate(w, "transfer", p)
 	case "POST":
-		if err := r.ParseForm(); err != nil {
+		if err = r.ParseForm(); err != nil {
 			session.Save(r, w)
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
@@ -680,6 +770,26 @@ func createParticipant(email, passwd string) (*Participant, error) {
 	participant.Passwd = xhashes.MD5(passwd)
 
 	return &participant, nil
+}
+
+func readToken(id string) (*Token, error) {
+	stmt, err := sqliteDatabase.Prepare("select * from tokens where id = ?")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token %s: %v", id, err)
+	}
+	defer stmt.Close()
+
+	var t Token
+	err = stmt.QueryRow(id).Scan(&t.Id)
+
+	switch {
+	case err == sql.ErrNoRows:
+		return nil, fmt.Errorf("token %s does not exists", id)
+	case err != nil:
+		return nil, fmt.Errorf("failed to get token %s: %v", id, err)
+	default:
+		return &t, nil
+	}
 }
 
 func readAsset(id string) (*Asset, error) {
@@ -899,7 +1009,7 @@ func main() {
 	}
 	defer ethClient.Close()
 
-	chainID, err := ethClient.ChainID(context.Background())
+	chainID, err = ethClient.ChainID(context.Background())
 	if err != nil {
 		log.Fatalf("Can not get chain id: %v", err)
 	}
@@ -907,8 +1017,11 @@ func main() {
 	baseAcc := accounts.Account{
 		Address: common.HexToAddress(*baseAccount),
 	}
-	ks := keystore.NewKeyStore(fmt.Sprintf("%s/keystore", *dataDir), keystore.StandardScryptN, keystore.StandardScryptP)
-	ks.Unlock(baseAcc, os.Getenv("BASE_ACC_PASSWD"))
+	ks = keystore.NewKeyStore(fmt.Sprintf("%s/keystore", *dataDir), keystore.StandardScryptN, keystore.StandardScryptP)
+	err = ks.Unlock(baseAcc, os.Getenv("BASE_ACC_PASSWD"))
+	if err != nil {
+		log.Fatalf("Can not unlock base account")
+	}
 
 	transactor, err = bind.NewKeyStoreTransactorWithChainID(ks, baseAcc, chainID)
 	if err != nil {
@@ -961,5 +1074,6 @@ func main() {
 	http.HandleFunc("/transfer/", makeHandler(transferHandler))
 	http.HandleFunc("/img/", makeHandler(imgHandler))
 	http.HandleFunc("/asset/", makeHandler(assetHandler))
+	http.HandleFunc("/token/", makeHandler(tokenHandler))
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", *httpHost, *httpPort), nil))
 }
