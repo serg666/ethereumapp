@@ -878,8 +878,8 @@ func initDB() {
 		content_type varchar(255) not null
 	);create table transfer_history (
 		ts timestamp not null default current_timestamp,
-		sender text not null,
-		recipient text not null,
+		sender varchar(255) not null,
+		recipient varchar(255) not null,
 		token_id integer not null
 	);create index transfer_history_token_id_idx on transfer_history(token_id);`
 
@@ -920,8 +920,8 @@ func get_events() {
 				if stmt, err := sqliteDatabase.Prepare(insertSQL); err == nil {
 					defer stmt.Close()
 					result, err := stmt.Exec(
-						vLog.Topics[1].Hex(),
-						vLog.Topics[2].Hex(),
+						common.HexToAddress(vLog.Topics[1].Hex()).Hex(),
+						common.HexToAddress(vLog.Topics[2].Hex()).Hex(),
 						vLog.Topics[3].Big().Int64(),
 					)
 					log.Printf("Insert result: %v", result)
