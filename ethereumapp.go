@@ -629,7 +629,7 @@ func getAccountHistory(acc *Account, result *[]interface{}) error {
 }
 
 func getAllTokens(tokens *[]interface {}) error {
-	stmt, err := sqliteDatabase.Prepare("select * from tokens")
+	stmt, err := sqliteDatabase.Prepare("select distinct token_id from transfer_history")
 	if err != nil {
 		return fmt.Errorf("Failed to get tokens: %v", err)
 	}
@@ -773,7 +773,7 @@ func createParticipant(email, passwd string) (*Participant, error) {
 }
 
 func readToken(id string) (*Token, error) {
-	stmt, err := sqliteDatabase.Prepare("select * from tokens where id = ?")
+	stmt, err := sqliteDatabase.Prepare("select token_id from transfer_history where token_id = ? limit 1")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get token %s: %v", id, err)
 	}
@@ -876,9 +876,12 @@ func initDB() {
 		description varchar(255) not null,
 		content blob not null,
 		content_type varchar(255) not null
-	);create table tokens (
-		id integer not null unique
-	);`
+	);create table transfer_history (
+		ts timestamp not null default current_timestamp,
+		sender text not null,
+		recipient text not null,
+		token_id integer not null
+	);create index transfer_history_token_id_idx on transfer_history(token_id);`
 
 	_, err := sqliteDatabase.Exec(initSQL)
 	if err != nil {
@@ -913,10 +916,14 @@ func get_events() {
 				log.Printf("To: %s", common.HexToAddress(vLog.Topics[2].Hex()))
 				log.Printf("Token: %s", vLog.Topics[3].Big().String())
 				log.Printf("Tx Hash: %s", vLog.TxHash.Hex())
-				insertSQL := `insert into tokens (id) values (?)`
+				insertSQL := `insert into transfer_history (sender, recipient, token_id) values (?, ?, ?)`
 				if stmt, err := sqliteDatabase.Prepare(insertSQL); err == nil {
 					defer stmt.Close()
-					result, err := stmt.Exec(vLog.Topics[3].Big().Int64())
+					result, err := stmt.Exec(
+						vLog.Topics[1].Hex(),
+						vLog.Topics[2].Hex(),
+						vLog.Topics[3].Big().Int64(),
+					)
 					log.Printf("Insert result: %v", result)
 					log.Printf("Insert err: %v", err)
 				}
