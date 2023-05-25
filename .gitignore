@@ -1,4 +1,5 @@
 ethereumapp
 sqlite-database.db
 nft/nft.go
+nft/build
 deploy/deploy

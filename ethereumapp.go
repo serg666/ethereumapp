@@ -1,4 +1,5 @@
-//go:generate abigen --sol nft/nft.sol --pkg nft --out nft/nft.go
+//go:generate solc --overwrite --abi --bin nft/nft.sol -o nft/build/
+//go:generate abigen --abi nft/build/SampleNFT.abi --bin nft/build/SampleNFT.bin --pkg nft --type SampleNFT --out nft/nft.go
 
 package main
 
